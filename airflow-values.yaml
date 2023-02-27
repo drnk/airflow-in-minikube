@@ -32,7 +32,7 @@ kubeVersionOverride: ""
 revisionHistoryLimit: ~
 
 # User and group of airflow user
-uid: 50000
+uid: 1000
 gid: 0
 
 # Default security context for airflow
