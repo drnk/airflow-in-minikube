@@ -4,6 +4,9 @@ Configuring helm:
 * `helm repo add apache-airflow https://airflow.apache.org`
 * `helm repo add bitnami https://charts.bitnami.com/bitnami`
 
+Or update helm repo:
+`helm repo update`
+
 
 Create folder for postgres data:
 `mkdir -p /home/drnk/dev/k8s/mnt/postgresql/data`
@@ -15,32 +18,28 @@ Create folder for airflow data:
 `chmod 777 /home/drnk/dev/k8s/mnt/airflow`
 
 
+Create folder for postgres data:
+`mkdir -p /home/drnk/dev/k8s/mnt/postgresql/data` 
+
 
 # STARTING MINIKUBE
 
 
 Start `minikube` instance:
-`minikube start --alsologtostderr --v=2`
-`minikube start --cpus 6 --memory 6144 --alsologtostderr --v=2`
-
-`minikube start --driver=kvm2 --cpus 6 --memory 6144`
-
 `minikube start --driver=docker --cpus 6 --memory 6144 --mount --mount-string="/home/drnk/dev/k8s/mnt:/mnt"`
 
+### Another starting minikube exxamples
+Start with additional logging:
+`minikube start --alsologtostderr --v=2`
 
-
---extra-config=kubelet.cgroup-driver=systemd
-
-Mount local folder to minikube VM (don't close)
-`minikube mount /home/drnk/dev/k8s/mnt:/opt/mnt`
-`minikube mount /home/drnk/dev/k8s/mnt:/opt/mnt --uid 10000 --gid 1000`
+Start with different driver (default is `docker`)
+`minikube start --driver=kvm2 --cpus 6 --memory 6144`
 
 
 # STORAGE
 
-Create namespace first:
-`kc create namespace databases`
-
+Create namespaces for database:
+* `kc create namespace databases`
 
 Create PV and PVC:
 
@@ -83,60 +82,10 @@ spec:
 EOF
 ```
 
-
-# DATABASE
-
-Deploy Postgres instance:
-`helm upgrade --install postgresql-db bitnami/postgresql -f postgresql-values.yaml -n databases --create-namespace`
-
-
-postgresql-db.databases.svc.cluster.local
-
-`export POSTGRES_PASSWORD=$(kubectl get secret --namespace databases postgresql-db -o jsonpath="{.data.postgres-password}" | base64 -d)`
-
-```
-** Please be patient while the chart is being deployed **
-
-PostgreSQL can be accessed via port 5432 on the following DNS names from within your cluster:
-
-    postgresql-db.databases.svc.cluster.local - Read/Write connection
-
-To get the password for "postgres" run:
-
-    export POSTGRES_PASSWORD=$(kubectl get secret --namespace databases postgresql-db -o jsonpath="{.data.postgres-password}" | base64 -d)
-
-To connect to your database run the following command:
-
-    kubectl run postgresql-db-client --rm --tty -i --restart='Never' --namespace databases --image docker.io/bitnami/postgresql:11.19.0-debian-11-r2 --env="PGPASSWORD=$POSTGRES_PASSWORD" \
-      --command -- psql --host postgresql-db -U postgres -d postgres -p 5432
-
-    > NOTE: If you access the container using bash, make sure that you execute "/opt/bitnami/scripts/postgresql/entrypoint.sh /bin/bash" in order to avoid the error "psql: local user with ID 1001} does not exist"
-
-To connect to your database from outside the cluster execute the following commands:
-
-    export NODE_IP=$(kubectl get nodes --namespace databases -o jsonpath="{.items[0].status.addresses[0].address}")
-    export NODE_PORT=$(kubectl get --namespace databases -o jsonpath="{.spec.ports[0].nodePort}" services postgresql-db)
-    PGPASSWORD="$POSTGRES_PASSWORD" psql --host $NODE_IP --port $NODE_PORT -U postgres -d postgres
-
-WARNING: The configured password will be ignored on new installation in case when previous Posgresql release was deleted through the helm command. In that case, old PVC will have an old password, and setting it through helm won't take effect. Deleting persistent volumes (PVs) will solve the issue.
-```
-
-## Setup Database
-https://airflow.apache.org/docs/apache-airflow/stable/howto/set-up-database.html#setting-up-a-postgresql-database
-
-```
-CREATE DATABASE airflow_db;
-CREATE USER airflow_user WITH PASSWORD 'airflow_pass';
-GRANT ALL PRIVILEGES ON DATABASE airflow_db TO airflow_user;
-```
-
-`PGPASSWORD="airflow_pass" psql --host $NODE_IP --port $NODE_PORT -U airflow_user -d airflow_db`
-
-# AIRFLOW
-
+Create namespace for airflow:
 `kc create namespace airflow`
 
-Create PV and PVCs for logs and DAGs:
+And then create PV and PVCs for logs and DAGs:
 
 ```
 kc apply -f - << EOF
@@ -195,6 +144,46 @@ spec:
       storage: 4Gi
 EOF
 ```
+
+# DATABASE
+
+## Deploy Postgres instance
+
+Deploy Postgres instance:
+`helm upgrade --install postgresql-db bitnami/postgresql -f postgresql-values.yaml -n databases --create-namespace`
+
+## Access Postgres instance
+
+Wait until postgres start. You could check availalability of postgres pod via:
+`kubectl get pods -n databases`
+
+Exmple response with running Postgres instance:
+```
+NAME              READY   STATUS    RESTARTS   AGE
+postgresql-db-0   1/1     Running   0          11m
+```
+
+Run below command to set env variables to connect then to postgres:
+```
+export POSTGRES_PASSWORD=$(kubectl get secret --namespace databases postgresql-db -o jsonpath="{.data.postgres-password}" | base64 -d) && \
+export NODE_IP=$(kubectl get nodes --namespace databases -o jsonpath="{.items[0].status.addresses[0].address}") && \
+export NODE_PORT=$(kubectl get --namespace databases -o jsonpath="{.spec.ports[0].nodePort}" services postgresql-db)
+```
+
+Connect to database using `psql`. If you don't have then you need to install it before:
+`PGPASSWORD="$POSTGRES_PASSWORD" psql --host $NODE_IP --port $NODE_PORT -U postgres -d postgres`
+
+
+## Setup Airflow database
+https://airflow.apache.org/docs/apache-airflow/stable/howto/set-up-database.html#setting-up-a-postgresql-database
+
+```
+CREATE DATABASE airflow_db;
+CREATE USER airflow_user WITH PASSWORD 'airflow_pass';
+GRANT ALL PRIVILEGES ON DATABASE airflow_db TO airflow_user;
+```
+
+# AIRFLOW
 
 Deploy Airflow instance:
 `helm upgrade --install airflow apache-airflow/airflow -f airflow-values.yaml -n airflow --create-namespace`
